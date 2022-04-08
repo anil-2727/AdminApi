@@ -30,6 +30,7 @@ type Credentials struct { //struct for signin
 	LastName string `json:"lastname" bson:"lastname"`
 	Email    string `json:"email" bson:"email"`
 	Password string `json:"password" bson:"password"`
+	OTP      string `json:"otp" bson:"otp"` //for forget password
 }
 
 // type DataDetails struct { //struct for login
@@ -48,8 +49,8 @@ func main() {
 
 	//cors function starts
 	c := cors.New(cors.Options{
-		AllowedOrigins: []string{"*"},
-
+		AllowedOrigins:   []string{"*"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH"},
 		AllowCredentials: true,
 		// AllowedHeaders:   []string{"*"},
 		AllowedHeaders: []string{"accept", "authorization", "content-type"},
@@ -68,6 +69,9 @@ func main() {
 
 	r.HandleFunc("/post", UserSignup).Methods("POST") //replace r in place of http and write the method
 	r.HandleFunc("/post/Login", UserLogin).Methods("POST")
+	r.HandleFunc("/post/ChangePassword/chaging/password", PostChangePassword).Methods("POST")
+	r.HandleFunc("/patch/ChangePassword/chaging/password", PatchChangePassword).Methods("PATCH")
+	r.HandleFunc("/home/forgot", ForgotPassword).Methods("PATCH")
 	r.HandleFunc("/get", getUser).Methods("GET") //replace r in place of http and write the method
 	http.Handle("/", r)                          //use this router as default handler
 	http.ListenAndServe("localhost:8080", handler)
@@ -182,7 +186,64 @@ func UserLogin(w http.ResponseWriter, r *http.Request) {
 	// detailss := collection.FindOne(ctx, bson.M{"email": details.Email}).Decode(&dbDetails)
 
 	// json.NewEncoder(w).Encode(bson.M{"sucess": true})
-	json.NewEncoder(w).Encode(tokenString)
+	json.NewEncoder(w).Encode(bson.M{"firstName": dbDetails.FirstName, "lastName": dbDetails.LastName, "Email": dbDetails.Email, "Token": tokenString})
+}
+
+//CHANGE PASSWORD POST
+
+func PostChangePassword(w http.ResponseWriter, r *http.Request) {
+	var credentials Credentials
+	var dbcredentials Credentials
+	err := json.NewDecoder(r.Body).Decode(&credentials)
+	collection := client.Database(db).Collection(col)
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	err = collection.FindOne(ctx, bson.M{"email": credentials.Email}).Decode(&dbcredentials)
+	fmt.Println(dbcredentials)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	userPass := []byte(credentials.Password)
+	dbPass := []byte(dbcredentials.Password)
+
+	passErr := bcrypt.CompareHashAndPassword(dbPass, userPass)
+
+	if passErr != nil {
+		log.Println(passErr)
+		//w.Write([]byte(`{"response":"Wrong Password!"}`))
+		w.WriteHeader(http.StatusInternalServerError)
+
+		return
+	}
+
+	json.NewEncoder(w).Encode(bson.M{"sucess": true})
+}
+
+//CHANGE PASSWORD PATCH
+func PatchChangePassword(w http.ResponseWriter, r *http.Request) {
+	var credentials Credentials
+
+	_ = json.NewDecoder(r.Body).Decode(&credentials)
+	credentials.Password = getHash([]byte(credentials.Password))
+	filter := bson.M{"email": credentials.Email}
+
+	update := bson.D{
+		{"$set", bson.D{{"password", credentials.Password}}},
+	}
+
+	collection := client.Database(db).Collection(col)
+	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+	getresult, err := collection.UpdateOne(ctx, filter, update)
+	if err != nil {
+		fmt.Println(err)
+		//c["error"] = "an error encountered"
+		//json.NewEncoder(response).Encode(c)
+		w.WriteHeader(http.StatusBadRequest)
+
+		return
+	}
+	json.NewEncoder(w).Encode(getresult)
+
 }
 
 // err := db.QueryRow("SELECT Password FROM Users WHERE Username = ?", user.Username).Scan(&storedPass)
@@ -196,6 +257,126 @@ func UserLogin(w http.ResponseWriter, r *http.Request) {
 //         // Here is error
 //         fmt.Println(err.Error())
 //     }
+
+//FORGET PASSWORD
+
+// func forgetPassword(w http.ResponseWriter, r *http.Request) {
+// 	w.Header().Set("Content-Type", "application/json")
+// 	var forgetDetails Credentials   //user entered details
+// 	var dbForgetDetails Credentials //db  details
+// 	json.NewDecoder(r.Body).Decode(&forgetDetails)
+// 	collection := client.Database(db).Collection(col) //connection to db
+// 	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+// 	collection.FindOne(ctx, bson.M{"email": forgetDetails.Email}).Decode(&dbForgetDetails) //compare email
+// 	dbOtp := dbForgetDetails.OTP                                                           //we are storing  db otp in dbotp
+// 	userOtp := forgetDetails.OTP                                                           //we are storing userotp
+// 	if dbOtp == userOtp {                                                                  //after otps are equal we are storing new password in db
+// 		forgetDetails.Password = getHash([]byte(forgetDetails.Password)) //here pasword is hashed
+// 		filter := bson.M{"email": forgetDetails.Email}                   //email is stored in var
+// 		update := bson.M{"$set": forgetDetails.Password}                 //we are setting
+// 		result, err := collection.UpdateOne(ctx, filter, update)         // we r updating in db by above variables
+// 		fmt.Println(result)
+
+// 		if err != nil {
+// 			fmt.Println("error")
+// 			w.Write([]byte("otp matched"))
+// 		}
+// 	} else {
+// 		fmt.Println("OTP is not matched")
+// 		w.Write([]byte("otp  not matched"))
+// 	}
+
+// }
+
+// func forgetPassword(response http.ResponseWriter, request *http.Request) {
+// 	c := make(map[string]interface{})
+// 	//json.NewEncoder(response).Encode(c)
+// 	var credentials Credentials
+// 	var dbcredentials Credentials
+
+// 	_ = json.NewDecoder(request.Body).Decode(&credentials)
+// 	fmt.Print(credentials)
+
+// 	//credentials.Password = getHash([]byte(credentials.Password))
+// 	// filter := bson.M{"email": credentials.Email}
+// 	// update := bson.M{
+// 	// 	"$set": credentials,
+// 	// }
+
+// 	collection := client.Database(db).Collection(col)
+// 	ctx, _ := context.WithTimeout(context.Background(), 5*time.Second)
+// 	err := collection.FindOne(ctx, bson.M{"email": credentials.Email}).Decode(&dbcredentials)
+// 	if err != nil {
+// 		response.WriteHeader(http.StatusBadRequest)
+// 		return
+// 	}
+// 	dbOtp := dbcredentials.OTP
+// 	userOtp := credentials.OTP
+
+// 	//otpErr := userOtp != dbOtp
+// 	if userOtp == dbOtp {
+// 		credentials.Password = getHash([]byte(credentials.Password))
+// 		filter := bson.M{"email": credentials.Email}
+// 		update := bson.D{
+// 			"$set": credentials,
+// 		}
+// 		getresult, err := collection.UpdateOne(ctx, filter, update)
+// 		if err != nil {
+// 			fmt.Println(err)
+// 			c["error"] = "an error encountered"
+// 			json.NewEncoder(response).Encode(c)
+// 			return
+// 		}
+// 		json.NewEncoder(response).Encode(getresult)
+// 		fmt.Print("otp matched")
+// 		response.Write([]byte("otp matched"))
+
+// 	} else {
+// 		response.Write([]byte("otp not matched"))
+// 	}
+
+// }
+
+func ForgotPassword(w http.ResponseWriter, r *http.Request) {
+	var credentials Credentials
+	var dbcredentials Credentials
+	json.NewDecoder(r.Body).Decode(&credentials)
+	collection := client.Database(db).Collection(col)
+	ctx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+	err := collection.FindOne(ctx, bson.M{"email": credentials.Email}).Decode(&dbcredentials)
+	fmt.Println(dbcredentials)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	userOtp := (credentials.OTP)
+	// dbOtp := "2121"
+	dbOtp := (dbcredentials.OTP)
+	if userOtp == dbOtp {
+		credentials.Password = getHash([]byte(credentials.Password))
+
+		filter := bson.M{"email": credentials.Email}
+
+		update := bson.D{
+			{"$set", bson.D{{"password", credentials.Password}}},
+		}
+		getresult, err := collection.UpdateOne(ctx, filter, update)
+		if err != nil {
+			fmt.Println(err)
+
+			w.WriteHeader(http.StatusBadRequest)
+
+			return
+		}
+
+		json.NewEncoder(w).Encode(getresult)
+	} else {
+		fmt.Println("wrong otp")
+		w.WriteHeader(http.StatusBadRequest)
+	}
+	json.NewEncoder(w).Encode(bson.M{"firstName": dbcredentials.FirstName, "lastName": dbcredentials.LastName, "Email": dbcredentials.Email})
+
+}
 
 //to get user details
 func getUser(w http.ResponseWriter, r *http.Request) { // r from user and response from db
